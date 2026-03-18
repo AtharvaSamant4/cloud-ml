@@ -169,6 +169,34 @@ def model_info():
     }
 
 
+@app.get("/logs")
+def get_logs():
+    if not os.path.exists(LOG_FILE):
+        return {"logs": [], "message": "No logs yet"}
+
+    try:
+        df = pd.read_csv(LOG_FILE)
+
+        # Convert to JSON
+        logs = df.to_dict(orient="records")
+
+        return {
+            "count": len(logs),
+            "logs": logs[-50:]   # return last 50 entries only
+        }
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.delete("/logs")
+def clear_logs():
+    if os.path.exists(LOG_FILE):
+        os.remove(LOG_FILE)
+
+    return {"status": "logs cleared"}
+
+
 @app.get("/")
 def health():
     return {"status": "ok"}
