@@ -6,3 +6,5 @@ uvicorn
 joblib
 xlrd
 numpy
+boto3
+python-dotenv

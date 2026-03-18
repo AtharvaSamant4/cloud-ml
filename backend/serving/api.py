@@ -2,9 +2,12 @@ import os
 import threading
 import time
 import sys
+import boto3
 from functools import lru_cache
+from dotenv import load_dotenv
 
 sys.stdout.flush()
+load_dotenv()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
@@ -22,6 +25,24 @@ DEBUG_LOG_FILE = os.path.join(LOG_DIR, "debug.log")
 
 app = FastAPI()
 
+if not all([
+    os.environ.get("R2_ACCESS_KEY"),
+    os.environ.get("R2_SECRET_KEY"),
+    os.environ.get("R2_BUCKET"),
+    os.environ.get("R2_ENDPOINT")
+]):
+    print("R2 env variables not set. Running in local fallback mode.", flush=True)
+    s3 = None
+else:
+    s3 = boto3.client(
+        "s3",
+        aws_access_key_id=os.environ.get("R2_ACCESS_KEY"),
+        aws_secret_access_key=os.environ.get("R2_SECRET_KEY"),
+        endpoint_url=os.environ.get("R2_ENDPOINT")
+    )
+
+print("R2 endpoint:", os.environ.get("R2_ENDPOINT"), flush=True)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -33,6 +54,21 @@ app.add_middleware(
 @lru_cache()
 def load_model():
     """Cache the loaded model in memory so it's only loaded once across requests."""
+    if not os.path.exists(MODEL_PATH):
+        if s3 is not None:
+            print("Downloading model from R2...", flush=True)
+            try:
+                s3.download_file(
+                    os.environ.get("R2_BUCKET", ""),
+                    "best_model.joblib",
+                    MODEL_PATH
+                )
+            except Exception as e:
+                print("Failed to download model:", e, flush=True)
+        else:
+            print("Skipping R2 operation (no env)", flush=True)
+
+    print("Loading model...", flush=True)
     print("Model loaded from:", MODEL_PATH, flush=True)
     if os.path.exists(MODEL_PATH):
         print("Model last modified:", os.path.getmtime(MODEL_PATH), flush=True)
@@ -56,6 +92,20 @@ def run_drift():
 
             check_drift()
             
+            if s3 is not None:
+                print("Uploading model to R2...", flush=True)
+                try:
+                    s3.upload_file(
+                        MODEL_PATH,
+                        os.environ.get("R2_BUCKET", ""),
+                        "best_model.joblib"
+                    )
+                    print("Model uploaded to R2", flush=True)
+                except Exception as e:
+                    print("Failed to upload model:", e, flush=True)
+            else:
+                print("Skipping R2 operation (no env)", flush=True)
+            
             # 🔥 IMPORTANT: clear cached model after retraining
             try:
                 load_model.cache_clear()
@@ -78,6 +128,25 @@ def run_drift():
     threading.Thread(target=run).start()
     
     return {"status": "drift triggered"}
+
+
+@app.on_event("startup")
+def startup():
+    if not os.path.exists(os.path.dirname(MODEL_PATH)):
+        os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+        
+    if s3 is not None:
+        try:
+            s3.download_file(
+                os.environ.get("R2_BUCKET", ""),
+                "best_model.joblib",
+                MODEL_PATH
+            )
+            print("Model synced from R2 on startup", flush=True)
+        except Exception as e:
+            print("No model in R2 yet, using local", flush=True)
+    else:
+        print("Skipping R2 operation (no env)", flush=True)
 
 
 @app.get("/debug-log")
