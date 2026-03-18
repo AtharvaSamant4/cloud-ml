@@ -6,13 +6,20 @@ import joblib
 import mlflow
 import mlflow.sklearn
 import json
+import os
 
-mlflow.set_tracking_uri("sqlite:///mlflow.db")
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_PATH = os.path.join(BASE_DIR, "data", "credit_default.xls")
+BASELINE_PATH = os.path.join(BASE_DIR, "monitoring", "baseline.json")
+MODEL_PATH = os.path.join(BASE_DIR, "training", "best_model.joblib")
+DB_PATH = os.path.join(BASE_DIR, "mlflow.db")
+
+mlflow.set_tracking_uri(f"sqlite:///{DB_PATH}")
 mlflow.set_experiment("credit-default")
 
 
 def load_data():
-    df = pd.read_excel("data/credit_default.xls", header=1)
+    df = pd.read_excel(DATA_PATH, header=1)
     df = df.drop(columns=["ID"])
     df = df.rename(columns={"default payment next month": "target"})
     return df
@@ -24,7 +31,10 @@ def train():
     # 🔥 Save baseline distribution
     baseline = df["target"].value_counts(normalize=True).to_dict()
 
-    with open("monitoring/baseline.json", "w") as f:
+    if not os.path.exists(os.path.dirname(BASELINE_PATH)):
+        os.makedirs(os.path.dirname(BASELINE_PATH), exist_ok=True)
+
+    with open(BASELINE_PATH, "w") as f:
         json.dump(baseline, f)
 
     X = df.drop("target", axis=1)
@@ -71,7 +81,7 @@ def train():
                 best_model = model
 
     # 🔥 Save BEST model (overwrite old one)
-    joblib.dump(best_model, "training/best_model.joblib")
+    joblib.dump(best_model, MODEL_PATH)
 
     print("✅ Training complete. Best F1:", best_f1)
 

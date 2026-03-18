@@ -1,40 +1,65 @@
+import os
+from functools import lru_cache
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import joblib
 from datetime import datetime
-import os
+
+from monitoring.drift_check import check_drift
+
+# 🔥 Base directory resolution for absolute paths
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+MODEL_PATH = os.path.join(BASE_DIR, "training", "best_model.joblib")
+LOG_DIR = os.path.join(BASE_DIR, "monitoring")
+LOG_FILE = os.path.join(LOG_DIR, "predictions_log.csv")
 
 app = FastAPI()
 
-# 🔥 MUST HAVE this to allow browser preflight OPTIONS requests!
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-MODEL_PATH = "training/best_model.joblib"
-LOG_FILE = "monitoring/predictions_log.csv"
-
-# Load model initially
-model = joblib.load(MODEL_PATH)
-
-
+@lru_cache()
 def load_model():
-    global model
-    model = joblib.load(MODEL_PATH)
+    """Cache the loaded model in memory so it's only loaded once across requests."""
+    return joblib.load(MODEL_PATH)
+
+
+@app.get("/run-drift")
+def run_drift():
+    """Triggered by GitHub Actions daily at 2 AM IST"""
+    try:
+        check_drift()
+        
+        # 🔥 IMPORTANT: clear cached model after retraining
+        try:
+            load_model.cache_clear()
+        except:
+            pass
+            
+        return {"status": "drift check completed"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/")
+def health():
+    return {"status": "ok"}
 
 
 # 🔥 Build full feature vector from minimal inputs
 def build_full_input(data):
     return {
         "LIMIT_BAL": data["LIMIT_BAL"],
-        "SEX": 2,          # SEX comes BEFORE AGE in fit()
+        "SEX": 2,          
         "EDUCATION": 2,
         "MARRIAGE": 1,
-        "AGE": data["AGE"], # AGE must come AFTER MARRIAGE
+        "AGE": data["AGE"], 
 
         # Replicate repayment behavior
         "PAY_0": data["PAY_0"],
@@ -62,20 +87,13 @@ def build_full_input(data):
     }
 
 
-@app.get("/")
-def home():
-    return {"message": "ML API is running"}
-
-
 @app.post("/predict")
 def predict(data: dict):
-    global model
-
     try:
-        # 🔥 Always reload latest model (after retraining)
-        load_model()
+        # 🔥 Load model efficiently using lru_cache
+        model = load_model()
 
-        # 🔥 Build full feature set
+        # Build full feature set
         full_data = build_full_input(data)
 
         df = pd.DataFrame([full_data])
@@ -88,14 +106,12 @@ def predict(data: dict):
         df["timestamp"] = datetime.now()
 
         # Ensure monitoring folder exists
-        if not os.path.exists("monitoring"):
-            os.makedirs("monitoring")
+        if not os.path.exists(LOG_DIR):
+            os.makedirs(LOG_DIR, exist_ok=True)
 
-        # Save logs
-        if not os.path.exists(LOG_FILE):
-            df.to_csv(LOG_FILE, index=False)
-        else:
-            df.to_csv(LOG_FILE, mode="a", header=False, index=False)
+        # ✅ Safe CSV appending (writes headers only if file doesn't exist)
+        write_header = not os.path.exists(LOG_FILE)
+        df.to_csv(LOG_FILE, mode="a", header=write_header, index=False)
 
         return {"prediction": int(prediction)}
 

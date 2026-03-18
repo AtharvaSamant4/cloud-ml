@@ -118,8 +118,10 @@ export default function PredictionForm() {
     }
 
     try {
-      // Corrected precision API fetch as specifically requested
-      const response = await fetch("http://127.0.0.1:8000/predict", {
+      // Use deployed environment variable if available, fallback to local IPv4 for dev
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+      
+      const response = await fetch(`${API_URL}/predict`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
@@ -145,7 +147,9 @@ export default function PredictionForm() {
     } catch (err: unknown) {
       console.error("Backend Error:", err);
       const msg = err instanceof Error ? err.message : "An unexpected network error occurred";
-      setApiError(`Could not fetch prediction. ${msg}`);
+      
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+      setApiError(`Could not fetch prediction. Make sure the API is running at ${API_URL}\n\nError: ${msg}`);
     } finally {
       setLoading(false);
     }
