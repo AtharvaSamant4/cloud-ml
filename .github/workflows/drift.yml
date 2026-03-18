@@ -1,18 +1,20 @@
 name: Daily Drift Check
 
 on:
+  workflow_dispatch:
   schedule:
-    - cron: "30 20 * * *"   # 20:30 UTC is 2:00 AM IST
+    - cron: "30 20 * * *"   # 2 AM IST
 
 jobs:
   drift:
     runs-on: ubuntu-latest
+
     steps:
       - name: Wake up server
-        run: curl https://YOUR-RENDER-URL.onrender.com
+        run: curl https://cloud-ml-1gde.onrender.com
 
-      - name: Wait for server to start
+      - name: Wait for server
         run: sleep 30
 
       - name: Run drift check
-        run: curl https://YOUR-RENDER-URL.onrender.com/run-drift
+        run: curl https://cloud-ml-1gde.onrender.com/run-drift
