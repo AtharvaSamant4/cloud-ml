@@ -12,6 +12,8 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_PATH = os.path.join(BASE_DIR, "data", "credit_default.xls")
 BASELINE_PATH = os.path.join(BASE_DIR, "monitoring", "baseline.json")
 MODEL_PATH = os.path.join(BASE_DIR, "training", "best_model.joblib")
+STAGING_MODEL_PATH = os.path.join(BASE_DIR, "training", "staging_model.joblib")
+STAGING_METRICS_PATH = os.path.join(BASE_DIR, "training", "staging_metrics.json")
 DB_PATH = os.path.join(BASE_DIR, "mlflow.db")
 
 mlflow.set_tracking_uri(f"sqlite:///{DB_PATH}")
@@ -22,6 +24,26 @@ def load_data():
     df = pd.read_excel(DATA_PATH, header=1)
     df = df.drop(columns=["ID"])
     df = df.rename(columns={"default payment next month": "target"})
+    
+    # 🔥 Attempt to securely merge newly verified Ground Truth data natively from Neon Database!
+    DATABASE_URL = os.environ.get("DATABASE_URL")
+    if DATABASE_URL:
+        try:
+            from sqlalchemy import create_engine
+            engine = create_engine(DATABASE_URL)
+            df_db = pd.read_sql("SELECT * FROM predictions_log WHERE actual_label IS NOT NULL", con=engine)
+            
+            if not df_db.empty:
+                # Strip out server tracking diagnostics logically mapping purely to ML inputs
+                df_db = df_db.drop(columns=["id", "timestamp", "prediction"], errors='ignore')
+                df_db = df_db.rename(columns={"actual_label": "target"})
+                
+                # Securely combine the two separated datasets natively expanding the algorithm!
+                df = pd.concat([df, df_db], ignore_index=True)
+                print(f"🔥 Successfully Merged {len(df_db)} verified Ground-Truth rows from Neon DB!", flush=True)
+        except Exception as e:
+            print("Failed to merge DB ground truth data:", e, flush=True)
+
     return df
 
 
@@ -80,11 +102,19 @@ def train():
                 best_f1 = f1
                 best_model = model
 
-    # 🔥 Save BEST model (overwrite old one)
-    joblib.dump(best_model, MODEL_PATH)
-    print("Model overwritten at training/best_model.joblib", flush=True)
+    # 🔥 Save STAGING model (do NOT overwrite production!)
+    joblib.dump(best_model, STAGING_MODEL_PATH)
+    print("Model isolated at training/staging_model.joblib", flush=True)
 
-    print("✅ Training complete. Best F1:", best_f1)
+    # 🔥 Save metrics for Admin UI dashboard
+    staging_metrics = {
+        "f1_score": round(best_f1, 4),
+        "status": "pending_approval"
+    }
+    with open(STAGING_METRICS_PATH, "w") as f:
+        json.dump(staging_metrics, f)
+
+    print("✅ Staging training complete. Best F1:", best_f1)
 
 
 if __name__ == "__main__":

@@ -13,17 +13,26 @@ from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import joblib
 from datetime import datetime
+from sqlalchemy import create_engine, text
+from prometheus_fastapi_instrumentator import Instrumentator
 
 from monitoring.drift_check import check_drift
 
 # 🔥 Base directory resolution for absolute paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE_DIR, "training", "best_model.joblib")
-LOG_DIR = os.path.join(BASE_DIR, "monitoring")
-LOG_FILE = os.path.join(LOG_DIR, "predictions_log.csv")
-DEBUG_LOG_FILE = os.path.join(LOG_DIR, "debug.log")
+STAGING_MODEL_PATH = os.path.join(BASE_DIR, "training", "staging_model.joblib")
+STAGING_METRICS_PATH = os.path.join(BASE_DIR, "training", "staging_metrics.json")
+DEBUG_LOG_FILE = os.path.join(BASE_DIR, "monitoring", "debug.log")
 
 app = FastAPI()
+
+# 🔥 Expose Prometheus Metrics for Grafana
+Instrumentator().instrument(app).expose(app)
+
+# 🔥 Initialize Neon PostgreSQL Database
+DATABASE_URL = os.environ.get("DATABASE_URL")
+engine = create_engine(DATABASE_URL) if DATABASE_URL else None
 
 if not all([
     os.environ.get("R2_ACCESS_KEY"),
@@ -92,35 +101,11 @@ def run_drift():
 
             check_drift()
             
-            if s3 is not None:
-                print("Uploading model to R2...", flush=True)
-                try:
-                    s3.upload_file(
-                        MODEL_PATH,
-                        os.environ.get("R2_BUCKET", ""),
-                        "best_model.joblib"
-                    )
-                    print("Model uploaded to R2", flush=True)
-                except Exception as e:
-                    print("Failed to upload model:", e, flush=True)
-            else:
-                print("Skipping R2 operation (no env)", flush=True)
-            
-            # 🔥 IMPORTANT: clear cached model after retraining
-            try:
-                load_model.cache_clear()
-                print("Model cache cleared after retraining", flush=True)
-                
-                with open(DEBUG_LOG_FILE, "a") as f:
-                    f.write(f"MODEL UPDATED AT {time.time()}\n")
-            except Exception as e:
-                print("Cache clear error:", e, flush=True)
-                
-            print("=== DRIFT CHECK FINISHED ===", flush=True)
+            print("=== DRIFT CHECK FINISHED (Staging Model Prepared) ===", flush=True)
             
             # Write debug file log
             with open(DEBUG_LOG_FILE, "a") as f:
-                f.write(f"DRIFT FINISHED AT {time.time()}\n")
+                f.write(f"STAGING MODEL WAITING AT {time.time()}\n")
             
         except Exception as e:
             print("Drift execution error:", e, flush=True)
@@ -158,6 +143,75 @@ def debug_log():
         return {"log": "No logs yet"}
 
 
+@app.get("/staging-model")
+def staging_model():
+    if not os.path.exists(STAGING_METRICS_PATH):
+        return {"status": "none"}
+    with open(STAGING_METRICS_PATH, "r") as f:
+        import json
+        metrics = json.load(f)
+    return {"status": "pending", "metrics": metrics}
+
+@app.post("/approve-model")
+def approve_model():
+    if not os.path.exists(STAGING_MODEL_PATH):
+        return {"error": "no staging model found"}
+    
+    import shutil
+    # Deploy to production natively
+    shutil.copy(STAGING_MODEL_PATH, MODEL_PATH)
+
+    if s3 is not None:
+        try:
+            s3.upload_file(MODEL_PATH, os.environ.get("R2_BUCKET", ""), "best_model.joblib")
+        except Exception:
+            pass
+
+    load_model.cache_clear()
+    os.remove(STAGING_MODEL_PATH)
+    if os.path.exists(STAGING_METRICS_PATH):
+        os.remove(STAGING_METRICS_PATH)
+        
+    return {"status": "approved"}
+
+@app.post("/reject-model")
+def reject_model():
+    if os.path.exists(STAGING_MODEL_PATH):
+        os.remove(STAGING_MODEL_PATH)
+    if os.path.exists(STAGING_METRICS_PATH):
+        os.remove(STAGING_METRICS_PATH)
+    return {"status": "rejected"}
+
+@app.get("/unlabeled-predictions")
+def get_unlabeled():
+    if not engine:
+        return {"logs": [], "message": "Database not configured"}
+    try:
+        df = pd.read_sql(
+            'SELECT id, timestamp, prediction, "LIMIT_BAL", "AGE", "PAY_0" FROM predictions_log WHERE actual_label IS NULL ORDER BY timestamp DESC LIMIT 50', 
+            con=engine
+        )
+        if "timestamp" in df.columns:
+            df["timestamp"] = df["timestamp"].astype(str)
+        logs = df.to_dict(orient="records")
+        return {"count": len(logs), "logs": logs}
+    except Exception as e:
+        return {"logs": [], "message": "Query failed. Did you add the actual_label column in Neon?", "error": str(e)}
+
+@app.post("/update-ground-truth/{row_id}")
+def update_truth(row_id: int, actual_label: int):
+    if not engine:
+        return {"error": "Database not configured"}
+    try:
+        with engine.begin() as conn:
+            conn.execute(
+                text("UPDATE predictions_log SET actual_label = :label WHERE id = :id"), 
+                {"label": actual_label, "id": row_id}
+            )
+        return {"status": "success", "row_id": row_id, "actual_label": actual_label}
+    except Exception as e:
+        return {"error": str(e)}
+
 @app.get("/model-info")
 def model_info():
     if not os.path.exists(MODEL_PATH):
@@ -171,29 +225,36 @@ def model_info():
 
 @app.get("/logs")
 def get_logs():
-    if not os.path.exists(LOG_FILE):
-        return {"logs": [], "message": "No logs yet"}
+    if not engine:
+        return {"logs": [], "message": "Database not configured"}
 
     try:
-        df = pd.read_csv(LOG_FILE)
+        # Read identically matching format leveraging UI mapped view
+        df = pd.read_sql("SELECT * FROM ui_logs LIMIT 20", con=engine)
+        
+        # Datetimes fail cleanly translating JSON manually natively over HTTP,
+        # Parse timestamp column converting strictly beforehand
+        if "timestamp" in df.columns:
+            df["timestamp"] = df["timestamp"].astype(str)
 
-        # Convert to JSON
         logs = df.to_dict(orient="records")
 
         return {
             "count": len(logs),
-            "logs": logs[-50:]   # return last 50 entries only
+            "logs": logs
         }
-
     except Exception as e:
-        return {"error": str(e)}
+        return {"logs": [], "message": "No logs yet or view missing", "error": str(e)}
 
 
 @app.delete("/logs")
 def clear_logs():
-    if os.path.exists(LOG_FILE):
-        os.remove(LOG_FILE)
-
+    if engine:
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("DELETE FROM predictions_log"))
+        except Exception:
+            pass
     return {"status": "logs cleared"}
 
 
@@ -258,13 +319,9 @@ def predict(data: dict):
         df["prediction"] = prediction
         df["timestamp"] = datetime.now()
 
-        # Ensure monitoring folder exists
-        if not os.path.exists(LOG_DIR):
-            os.makedirs(LOG_DIR, exist_ok=True)
-
-        # ✅ Safe CSV appending (writes headers only if file doesn't exist)
-        write_header = not os.path.exists(LOG_FILE)
-        df.to_csv(LOG_FILE, mode="a", header=write_header, index=False)
+        # ✅ Send pure matrix strictly over Cloud Network
+        if engine:
+            df.to_sql("predictions_log", con=engine, if_exists="append", index=False)
 
         return {"prediction": int(prediction)}
 
