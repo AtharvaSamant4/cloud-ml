@@ -1,4 +1,5 @@
 import os
+import threading
 from functools import lru_cache
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,19 +33,28 @@ def load_model():
 
 @app.get("/run-drift")
 def run_drift():
-    """Triggered by GitHub Actions daily at 2 AM IST"""
-    try:
-        check_drift()
-        
-        # 🔥 IMPORTANT: clear cached model after retraining
+    """Triggered by GitHub Actions daily at 2 AM IST, executing freely without blocking the event loop."""
+    
+    def run():
         try:
-            load_model.cache_clear()
-        except:
-            pass
+            print("=== DRIFT CHECK STARTED ===", flush=True)
+            check_drift()
             
-        return {"status": "drift check completed"}
-    except Exception as e:
-        return {"error": str(e)}
+            # 🔥 IMPORTANT: clear cached model after retraining
+            try:
+                load_model.cache_clear()
+                print("Model cache cleared", flush=True)
+            except Exception as e:
+                print("Cache clear error:", e, flush=True)
+                
+            print("=== DRIFT CHECK FINISHED ===", flush=True)
+            
+        except Exception as e:
+            print("Drift execution error:", e, flush=True)
+
+    threading.Thread(target=run).start()
+    
+    return {"status": "drift triggered"}
 
 
 @app.get("/")

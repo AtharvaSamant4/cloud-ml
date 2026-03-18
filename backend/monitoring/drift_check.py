@@ -13,8 +13,9 @@ THRESHOLD = 0.2
 
 
 def check_drift():
+    print("Running drift check...", flush=True)
     if not os.path.exists(LOG_FILE) or not os.path.exists(BASELINE_FILE):
-        print("Missing log or baseline file. Skipping drift check.")
+        print("Not enough data for drift detection", flush=True)
         return
 
     df = pd.read_csv(LOG_FILE)
@@ -29,21 +30,21 @@ def check_drift():
 
     drift = abs(current_default - baseline_default)
 
-    print("\n=== DRIFT CHECK ===")
-    print("Baseline:", baseline_default)
-    print("Current:", current_default)
-    print("Drift:", drift)
+    print("\n=== DRIFT CHECK ===", flush=True)
+    print("Baseline:", baseline_default, flush=True)
+    print("Current:", current_default, flush=True)
+    print(f"Drift value: {drift}", flush=True)
 
     if drift > THRESHOLD:
-        print("\n⚠️ DRIFT DETECTED → RETRAINING\n")
+        print("Drift detected → retraining", flush=True)
 
         # 🔥 FIX: use same Python environment and absolute path
         subprocess.run([sys.executable, TRAIN_SCRIPT])
 
-        print("\n✅ Model retrained")
+        print("Retraining complete", flush=True)
 
     else:
-        print("\n✅ No drift")
+        print("\n✅ No drift", flush=True)
 
 
 if __name__ == "__main__":
