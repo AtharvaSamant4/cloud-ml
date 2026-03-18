@@ -2,3 +2,37 @@ ml-env/
 __pycache__/
 *.pyc
 data/*.xls
+
+
+# Python
+__pycache__/
+*.pyc
+
+# Virtual env
+ml-env/
+
+# Data files
+data/*.xls
+data/*.csv
+
+# Model files
+*.joblib
+
+# MLflow
+mlruns/
+mlflow.db
+
+# Logs
+monitoring/predictions_log.csv
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime files
+monitoring/baseline.json
+
+# Local testing scripts
+test_api.py
+normal_traffic.py
+force_drift.py
