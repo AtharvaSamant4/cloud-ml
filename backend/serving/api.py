@@ -1,6 +1,10 @@
 import os
 import threading
+import time
+import sys
 from functools import lru_cache
+
+sys.stdout.flush()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
@@ -14,6 +18,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_PATH = os.path.join(BASE_DIR, "training", "best_model.joblib")
 LOG_DIR = os.path.join(BASE_DIR, "monitoring")
 LOG_FILE = os.path.join(LOG_DIR, "predictions_log.csv")
+DEBUG_LOG_FILE = os.path.join(LOG_DIR, "debug.log")
 
 app = FastAPI()
 
@@ -38,6 +43,14 @@ def run_drift():
     def run():
         try:
             print("=== DRIFT CHECK STARTED ===", flush=True)
+
+            # Small delay to allow Render logging system to attach
+            time.sleep(5)
+
+            # Write debug file log
+            with open(DEBUG_LOG_FILE, "a") as f:
+                f.write("DRIFT STARTED\n")
+
             check_drift()
             
             # 🔥 IMPORTANT: clear cached model after retraining
@@ -49,12 +62,25 @@ def run_drift():
                 
             print("=== DRIFT CHECK FINISHED ===", flush=True)
             
+            # Write debug file log
+            with open(DEBUG_LOG_FILE, "a") as f:
+                f.write("DRIFT FINISHED\n")
+            
         except Exception as e:
             print("Drift execution error:", e, flush=True)
 
     threading.Thread(target=run).start()
     
     return {"status": "drift triggered"}
+
+
+@app.get("/debug-log")
+def debug_log():
+    try:
+        with open(DEBUG_LOG_FILE, "r") as f:
+            return {"log": f.read()}
+    except:
+        return {"log": "No logs yet"}
 
 
 @app.get("/")
