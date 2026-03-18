@@ -33,6 +33,9 @@ app.add_middleware(
 @lru_cache()
 def load_model():
     """Cache the loaded model in memory so it's only loaded once across requests."""
+    print("Model loaded from:", MODEL_PATH, flush=True)
+    if os.path.exists(MODEL_PATH):
+        print("Model last modified:", os.path.getmtime(MODEL_PATH), flush=True)
     return joblib.load(MODEL_PATH)
 
 
@@ -49,14 +52,17 @@ def run_drift():
 
             # Write debug file log
             with open(DEBUG_LOG_FILE, "a") as f:
-                f.write("DRIFT STARTED\n")
+                f.write(f"DRIFT STARTED AT {time.time()}\n")
 
             check_drift()
             
             # 🔥 IMPORTANT: clear cached model after retraining
             try:
                 load_model.cache_clear()
-                print("Model cache cleared", flush=True)
+                print("Model cache cleared after retraining", flush=True)
+                
+                with open(DEBUG_LOG_FILE, "a") as f:
+                    f.write(f"MODEL UPDATED AT {time.time()}\n")
             except Exception as e:
                 print("Cache clear error:", e, flush=True)
                 
@@ -64,7 +70,7 @@ def run_drift():
             
             # Write debug file log
             with open(DEBUG_LOG_FILE, "a") as f:
-                f.write("DRIFT FINISHED\n")
+                f.write(f"DRIFT FINISHED AT {time.time()}\n")
             
         except Exception as e:
             print("Drift execution error:", e, flush=True)
@@ -81,6 +87,17 @@ def debug_log():
             return {"log": f.read()}
     except:
         return {"log": "No logs yet"}
+
+
+@app.get("/model-info")
+def model_info():
+    if not os.path.exists(MODEL_PATH):
+        return {"error": "model not found"}
+
+    return {
+        "model_path": MODEL_PATH,
+        "last_modified": os.path.getmtime(MODEL_PATH)
+    }
 
 
 @app.get("/")
@@ -126,6 +143,9 @@ def build_full_input(data):
 @app.post("/predict")
 def predict(data: dict):
     try:
+        if os.path.exists(MODEL_PATH):
+            print("Using model timestamp:", os.path.getmtime(MODEL_PATH), flush=True)
+
         # 🔥 Load model efficiently using lru_cache
         model = load_model()
 

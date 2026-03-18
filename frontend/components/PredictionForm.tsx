@@ -118,7 +118,7 @@ export default function PredictionForm() {
     }
 
     try {
-      // Use deployed environment variable if available, fallback to local IPv4 for dev
+      // Use deployed environment variable if available, fallback to explicit IPv4 for dev
       const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
       
       const response = await fetch(`${API_URL}/predict`, {
@@ -146,10 +146,8 @@ export default function PredictionForm() {
       
     } catch (err: unknown) {
       console.error("Backend Error:", err);
-      const msg = err instanceof Error ? err.message : "An unexpected network error occurred";
-      
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
-      setApiError(`Could not fetch prediction. Make sure the API is running at ${API_URL}\n\nError: ${msg}`);
+      // Clean fallback error as explicitly asked
+      setApiError("Failed to connect to backend. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -212,7 +210,7 @@ export default function PredictionForm() {
           {loading ? (
             <>
               <div className="spinner" />
-              <span>Predicting...</span>
+              <span>Backend waking up...</span>
             </>
           ) : (
             <>

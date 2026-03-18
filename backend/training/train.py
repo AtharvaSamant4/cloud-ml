@@ -82,6 +82,7 @@ def train():
 
     # 🔥 Save BEST model (overwrite old one)
     joblib.dump(best_model, MODEL_PATH)
+    print("Model overwritten at training/best_model.joblib", flush=True)
 
     print("✅ Training complete. Best F1:", best_f1)
 
