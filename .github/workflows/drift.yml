@@ -11,10 +11,10 @@ jobs:
 
     steps:
       - name: Wake up server
-        run: curl https://cloud-ml-1gde.onrender.com
+        run: curl https://cloud-ml-7g3v.onrender.com
 
       - name: Wait for server
         run: sleep 30
 
       - name: Run drift check
-        run: curl https://cloud-ml-1gde.onrender.com/run-drift
+        run: curl https://cloud-ml-7g3v.onrender.com/run-drift
