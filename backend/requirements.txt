@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-dotenv
+boto3
+pandas
+joblib
+sqlalchemy
+prometheus_fastapi_instrumentator
+prometheus_client
+redis
+numpy
