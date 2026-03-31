@@ -1,0 +1,59 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cloudml-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Postgres connection for logging + labeling
+      - DATABASE_URL=postgresql+psycopg2://ml_user:ml_pass@postgres:5432/ml_db
+      # Optional: object storage creds (fill in if using R2/S3)
+      - R2_ACCESS_KEY=
+      - R2_SECRET_KEY=
+      - R2_BUCKET=
+      - R2_ENDPOINT=
+      # Allow FastAPI to bind on all interfaces
+      - PORT=8000
+    depends_on:
+      - postgres
+    networks:
+      - cloudml-net
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: cloudml-postgres
+    environment:
+      - POSTGRES_USER=ml_user
+      - POSTGRES_PASSWORD=ml_pass
+      - POSTGRES_DB=ml_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - cloudml-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cloudml-frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - cloudml-net
+
+networks:
+  cloudml-net:
+    driver: bridge
+
+volumes:
+  pgdata:

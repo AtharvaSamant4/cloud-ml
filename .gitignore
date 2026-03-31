@@ -19,16 +19,20 @@ data/*.csv
 # Model files
 *.joblib
 
-# MLflow
+# MLflow (removed)
 mlruns/
 mlflow.db
 
 # Logs
 monitoring/predictions_log.csv
+monitoring/debug.log
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Claude Code
+.claude/
 
 # Runtime files
 monitoring/baseline.json
